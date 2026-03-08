@@ -5,12 +5,6 @@ builder = "nixpacks"
 startCommand = "npm start"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 10
-
-[[deploy.healthcheckPath]]
-path = "/api/health"
 
 [environment]
 PORT = "3000"
-NODE_ENV = "production"
