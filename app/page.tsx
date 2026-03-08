@@ -44,3 +44,10 @@ curl https://agent-memory.up.railway.app/api/memories?key=user_prefs \\
     </main>
   )
 }
+
+{/* Coming Soon Banner */}
+<div className="bg-blue-500 text-white py-2 px-4 text-center">
+  <p className="text-sm">
+    🚀 Deploying soon! Join the waitlist for early access and 3 months free Pro tier.
+  </p>
+</div>
