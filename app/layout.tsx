@@ -1,9 +1,6 @@
-import type { Metadata } from 'next'
-import './globals.css'
-
-export const metadata: Metadata = {
-  title: 'Agent Memory - Persistent Memory for AI Agents',
-  description: 'Never lose context again. Simple REST API for AI agent memory storage.',
+export const metadata = {
+  title: 'Agent Memory Service',
+  description: 'Persistent storage for AI agents',
 }
 
 export default function RootLayout({
