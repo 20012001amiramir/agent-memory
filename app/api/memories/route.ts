@@ -1,90 +1,138 @@
-import { createClient } from '@supabase/supabase-js'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-)
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.warn('Supabase credentials not configured. API will run in demo mode.');
+}
+
+const supabase = supabaseUrl && supabaseKey 
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
+
+// In-memory store for demo mode
+const demoStore = new Map<string, any>();
 
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = request.headers.get('x-api-key')
+    const apiKey = request.headers.get('X-API-Key');
     if (!apiKey) {
-      return NextResponse.json({ error: 'API key required' }, { status: 401 })
+      return NextResponse.json({ error: 'Missing API key' }, { status: 401 });
     }
 
-    const { namespace, key, value, ttl } = await request.json()
-    
-    if (!key || !value) {
-      return NextResponse.json({ error: 'key and value required' }, { status: 400 })
+    const body = await request.json();
+    const { namespace, key, value } = body;
+
+    if (!namespace || !key || value === undefined) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
-    
-    const { data, error } = await supabase
-      .from('memories')
-      .upsert({
-        api_key: apiKey,
-        namespace: namespace || 'default',
+
+    if (supabase) {
+      // Production mode with Supabase
+      const { data, error } = await supabase
+        .from('memories')
+        .upsert({
+          namespace,
+          key,
+          value,
+          api_key: apiKey,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'namespace,key,api_key'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Supabase error:', error);
+        return NextResponse.json({ error: 'Failed to store memory' }, { status: 500 });
+      }
+
+      return NextResponse.json({ 
+        success: true, 
+        memory: {
+          namespace: data.namespace,
+          key: data.key,
+          value: data.value,
+          updated_at: data.updated_at
+        }
+      });
+    } else {
+      // Demo mode with in-memory store
+      const memoryKey = `${apiKey}:${namespace}:${key}`;
+      const memory = {
+        namespace,
         key,
         value,
-        ttl: ttl ? new Date(Date.now() + ttl * 1000).toISOString() : null
-      })
-      .select()
-      .single()
-    
-    if (error) throw error
-    
-    return NextResponse.json({ success: true, data })
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
+        updated_at: new Date().toISOString()
+      };
+      demoStore.set(memoryKey, memory);
+      
+      return NextResponse.json({ 
+        success: true, 
+        memory,
+        demo_mode: true
+      });
+    }
+  } catch (error) {
+    console.error('API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function GET(request: NextRequest) {
-  const apiKey = request.headers.get('x-api-key')
-  if (!apiKey) {
-    return NextResponse.json({ error: 'API key required' }, { status: 401 })
-  }
-
-  const { searchParams } = new URL(request.url)
-  const key = searchParams.get('key')
-  const q = searchParams.get('q')
-  const namespace = searchParams.get('namespace') || 'default'
-  
   try {
-    if (key) {
+    const apiKey = request.headers.get('X-API-Key');
+    if (!apiKey) {
+      return NextResponse.json({ error: 'Missing API key' }, { status: 401 });
+    }
+
+    const { searchParams } = new URL(request.url);
+    const namespace = searchParams.get('namespace');
+    const key = searchParams.get('key');
+
+    if (!namespace || !key) {
+      return NextResponse.json({ error: 'Missing namespace or key' }, { status: 400 });
+    }
+
+    if (supabase) {
+      // Production mode with Supabase
       const { data, error } = await supabase
         .from('memories')
-        .select('*')
+        .select('namespace, key, value, updated_at')
         .eq('api_key', apiKey)
         .eq('namespace', namespace)
         .eq('key', key)
-        .single()
-      
-      if (error && error.code !== 'PGRST116') throw error
-      return NextResponse.json({ data: data || null })
-    } else if (q) {
-      const { data, error } = await supabase
-        .from('memories')
-        .select('*')
-        .eq('api_key', apiKey)
-        .eq('namespace', namespace)
-        .textSearch('value', q)
-        .limit(10)
-      
-      if (error) throw error
-      return NextResponse.json({ data })
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return NextResponse.json({ error: 'Memory not found' }, { status: 404 });
+        }
+        console.error('Supabase error:', error);
+        return NextResponse.json({ error: 'Failed to retrieve memory' }, { status: 500 });
+      }
+
+      return NextResponse.json({ memory: data });
     } else {
-      const { data, error } = await supabase
-        .from('memories')
-        .select('*')
-        .eq('api_key', apiKey)
-        .eq('namespace', namespace)
-        .limit(100)
+      // Demo mode with in-memory store
+      const memoryKey = `${apiKey}:${namespace}:${key}`;
+      const memory = demoStore.get(memoryKey);
       
-      if (error) throw error
-      return NextResponse.json({ data })
+      if (!memory) {
+        return NextResponse.json({ error: 'Memory not found' }, { status: 404 });
+      }
+      
+      return NextResponse.json({ 
+        memory,
+        demo_mode: true
+      });
     }
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
+  } catch (error) {
+    console.error('API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
